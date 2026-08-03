@@ -1,79 +1,66 @@
-# Bits&Bytes Mail Server
+# email-server
 
-A production-ready, resource-efficient mail server stack optimized for single VPS deployment on Ubuntu 24.04 LTS.
+running your own mail server on a small VPS is usually a mess of scattered configs, broken deliverability, and unmaintainable shell scripts. this repo is how we run ours on a single Ubuntu 24.04 box without paying monthly per-mailbox fees or losing sleep over port 25 blocks.
 
-Features **Postfix** (SMTP), **Dovecot** (IMAP), **OpenDKIM** (DKIM signing), **Brevo** (Transactional HTTP relay), and a **Streamlit Admin Dashboard** for user lifecycle and quota management.
+it combines Postfix for incoming SMTP, Dovecot for IMAP, OpenDKIM for signing, Brevo's HTTP API for outbound delivery when residential or cloud IPs get flagged, and a single-file Streamlit panel so you do not need to edit raw `/etc/` files every time someone needs a password reset.
 
----
+## how it works
 
-## Features
+- inbound mail comes straight to Postfix and Dovecot.
+- outbound mail routes through `scripts/brevo-send.py` over HTTPS to bypass outbound port 25 restrictions.
+- admin tasks happen via `mail-server-backend.py`, a Streamlit dashboard that edits virtual maps, user accounts, and quota policies safely.
+- provisioning is handled by `cli/reprovision.sh`, an idempotent bash script with a mandatory `--plan` dry-run step so you can see changes before they touch system config.
 
-- 📧 **Full Email Stack**: Postfix + Dovecot + OpenDKIM for secure email receiving and IMAP access.
-- 🚀 **Brevo Relay Integration**: Fast transactional email sending via Brevo HTTP REST API v3 fallback.
-- 🎛️ **Single-File Streamlit Admin UI**: Manage mailboxes, passwords, alias mappings, forwards, quotas, and service health metrics.
-- 🛠️ **Idempotent Reprovisioning CLI**: Automated VPS setup script (`cli/reprovision.sh`) with `--plan`, `--apply`, and `--verify` modes.
-- 🔐 **Security First**: Environment configuration via `.env`, strict `.gitignore` safeguards, and UFW / Fail2ban firewall integration.
+## setup
 
----
-
-## Quickstart
-
-### 1. Environment Setup
-
-Copy `.env.example` to `.env` and fill in your deployment parameters:
+1. copy the environment template:
 
 ```bash
 cp .env.example .env
 ```
 
-Key environment variables:
-- `DOMAIN`: Your primary email domain (e.g. `example.com`)
-- `MAIL_HOST`: Your mail server host (e.g. `mail.example.com`)
-- `BREVO_API_KEY`: Brevo transactional API v3 key
-- `AUDIT_BCC_EMAIL`: Audit / security notification address
+2. set your domain and credentials in `.env`:
 
-### 2. Reprovision / Deploy on VPS
+```env
+DOMAIN=gobitsnbytes.org
+MAIL_HOST=mail.gobitsnbytes.org
+BREVO_API_KEY=your_key_here
+AUDIT_BCC_EMAIL=audit@gobitsnbytes.org
+```
 
-Run in dry-run mode to inspect the execution plan:
+3. test the provisioning plan on a fresh Ubuntu 24.04 VPS:
 
 ```bash
 sudo ./cli/reprovision.sh --plan
 ```
 
-Apply the provisioning steps on a fresh Ubuntu 24.04 VPS:
+4. apply configuration:
 
 ```bash
 sudo ./cli/reprovision.sh --apply
 ```
 
-Verify status of all mail services:
+5. verify listening ports and service health:
 
 ```bash
 sudo ./cli/reprovision.sh --verify
 ```
 
-### 3. Launch Admin Dashboard
+6. run the admin panel locally or behind a reverse proxy:
 
 ```bash
-/root/.env/bin/streamlit run mail-server-backend.py --server.address 127.0.0.1 --server.port 8501
+/root/.venv/bin/streamlit run mail-server-backend.py --server.address 127.0.0.1 --server.port 8501
 ```
 
----
+## layout
 
-## Architecture Overview
+- `cli/reprovision.sh`: full system setup script with `--plan`, `--apply`, and `--verify` modes.
+- `mail-server-backend.py`: Streamlit management panel for mailboxes, virtual aliases, forwards, and quotas.
+- `scripts/brevo-send.py`: Python CLI tool reading RFC822 messages from stdin and posting to Brevo API v3.
+- `configs/`: production configuration files for Postfix, Dovecot, OpenDKIM, Nginx, systemd, and Fail2ban.
+- `tech-spec.md`: complete architectural spec and DNS setup guide.
+- `AGENTS.md`: operational rules and team guidelines.
 
-- `/etc/postfix/` - Postfix SMTP configuration, virtual maps, transport rules
-- `/etc/dovecot/` - Dovecot IMAP configuration & authentication
-- `/etc/opendkim/` - DKIM keys, SigningTable, KeyTable, TrustedHosts
-- `scripts/brevo-send.py` - Transactional outbound mail engine via Brevo API v3
-- `mail-server-backend.py` - Streamlit admin control panel
-- `cli/reprovision.sh` - Stack reprovisioning CLI tool
+## license
 
-For complete architectural details, see [tech-spec.md](tech-spec.md) and team directives in [AGENTS.md](AGENTS.md).
-
----
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.  
-Copyright (c) 2026 **GOBITSNBYTES FOUNDATION**. All rights reserved.
+MIT License. Copyright (c) 2026 GOBITSNBYTES FOUNDATION.
