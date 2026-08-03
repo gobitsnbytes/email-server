@@ -1,0 +1,3 @@
+
+default._domainkey.gobitsnbytes.org gobitsnbytes.org:default:/etc/opendkim/keys/gobitsnbytes.org/default.private
+

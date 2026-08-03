@@ -1,0 +1,5 @@
+# See man 5 aliases for format
+postmaster:    root
+prayagraj: bitsnbytes.prayagraj@gmail.com
+default: hello
+bearwar: "|/usr/local/bin/brevo-send.py bitsnbytes.baewar@gmail.com"

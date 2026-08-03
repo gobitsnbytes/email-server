@@ -1,0 +1,15 @@
+[Unit]
+Description=Casdoor IAM v3.54.2
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt
+ExecStart=/opt/casdoor --config /opt/conf/app.conf
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+Environment=GOGC=50
+
+[Install]
+WantedBy=multi-user.target

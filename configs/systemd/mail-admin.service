@@ -1,0 +1,12 @@
+[Unit]
+Description=BitsnBytes Mail Admin Streamlit
+After=network.target
+
+[Service]
+WorkingDirectory=/root
+ExecStart=/root/.venv/bin/streamlit run /root/mail-server-backend.py --server.address 127.0.0.1 --server.port 8501
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

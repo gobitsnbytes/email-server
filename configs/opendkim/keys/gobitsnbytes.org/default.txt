@@ -1,0 +1,3 @@
+default._domainkey	IN	TXT	( "v=DKIM1; h=sha256; k=rsa; "
+	  "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAijsDt11nVe2nXyJkjZhKNER78l01dsxI2ofVHFFc0zvvM7VDGSHy1k4RDpAvzWoQhDbsw7FyaaUDNHZwljybDpruycGOOrbNRL4P8GJJUxzp2Dj3Ouiv3uo0p+qklmMT25aegXUmzx4uHErFRWlJw9hjDCYF+cbfLtGSDUNSpMIqvBlSHCyn3tKdFFjt2LSk4p1j6WYjun9heW"
+	  "FrIrvN8EL39M1GtrfpJjynAmRxXDe8G12Cs3fSf7YBPD4Y1aiSmnAlV+/j3YkUqG9m673R4Xy/xO+iJM1CQZym7yEHaTqvjXROzMUcMg6JSQybDTiWW8S7FT7tNWpCF+abyru2awIDAQAB" )  ; ----- DKIM key default for gobitsnbytes.org
