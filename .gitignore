@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 *.key
+*.pub
 *.pem
 *.crt
 *.private
