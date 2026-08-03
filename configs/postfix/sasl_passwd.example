@@ -1,0 +1,3 @@
+# Postfix SASL authentication credentials for SMTP relay
+# Format: [relay_host]:port username:password
+[smtp-relay.brevo.com]:587 your_brevo_smtp_user_here:your_brevo_smtp_password_here

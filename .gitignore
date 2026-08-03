@@ -1,0 +1,34 @@
+# Environment & Secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.crt
+*.private
+configs/nginx/.mailadmin.htpasswd
+configs/postfix/sasl_passwd
+
+# Server Log Dumps & Contract Archives
+*.log
+*.log.*
+*.log.tail
+mail-admin-contract.tar.gz
+mail-admin-contract/
+
+# Tooling, Temp & Build Outputs
+.commandcode/
+dry-run-output.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# OS Metadata
+.DS_Store
+Thumbs.db
+desktop.ini
