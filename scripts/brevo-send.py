@@ -124,16 +124,30 @@ def safe_str(v, fallback=""):
     return str(v)
 
 
+def fix_unicode_escapes(text):
+    if not text:
+        return ""
+    # Convert literal unicode escape sequences like \u2019 or \\u2019 to actual characters
+    text = re.sub(r"\\?u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text)
+    # Convert smart quotes/apostrophes to clean standard ASCII characters
+    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    return text
+
+
 def main():
     if not BREVO_API_KEY:
         print('ERR: {"code":"missing_api_key","message":"BREVO_API_KEY is not set in environment or .env file"}', file=sys.stderr)
         sys.exit(1)
 
-    raw = sys.stdin.read()
+    try:
+        raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    except Exception:
+        raw = sys.stdin.read()
+
     msg = emaillib.message_from_string(raw)
 
     to_addr = safe_str(sys.argv[1] if len(sys.argv) > 1 else msg.get("To", ""), "").strip()
-    subject = safe_str(msg.get("Subject", "(no subject)"), "(no subject)").strip() or "(no subject)"
+    subject = fix_unicode_escapes(safe_str(msg.get("Subject", "(no subject)"), "(no subject)").strip() or "(no subject)")
     from_name, from_email = parse_from_header(msg.get("From", f"noreply@{DOMAIN}"))
 
     text_body, html_body = extract_bodies(msg)
@@ -144,6 +158,10 @@ def main():
         safe_text = html_to_text(safe_str(html_body, ""))
     if not safe_text:
         safe_text = " "  # one-space fallback to satisfy strict validators
+
+    safe_text = fix_unicode_escapes(safe_text)
+    if html_body:
+        html_body = fix_unicode_escapes(safe_str(html_body, ""))
 
     if not to_addr:
         print('ERR: {"code":"missing_parameter","message":"recipient email is missing"}', file=sys.stderr)
@@ -156,8 +174,12 @@ def main():
         "textContent": safe_text
     }
 
+    # Always ensure gobitsnbytes@gmail.com is CC'd for full organization visibility
+    if to_addr.strip().lower() != "gobitsnbytes@gmail.com":
+        payload_obj["cc"] = [{"email": "gobitsnbytes@gmail.com"}]
+
     if html_body:
-        payload_obj["htmlContent"] = safe_str(html_body, "")
+        payload_obj["htmlContent"] = html_body
 
     payload = json.dumps(payload_obj, ensure_ascii=False).encode("utf-8")
 
