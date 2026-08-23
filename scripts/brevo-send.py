@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import email as emaillib
+import base64
 import html
 import json
 import os
@@ -11,15 +12,16 @@ from pathlib import Path
 
 
 def load_env_file():
-    """Load environment variables from .env file if present."""
+    """Load delivery credentials from a file readable by the Postfix pipe user."""
     env_paths = [
+        Path(os.environ.get("BREVO_ENV_FILE", "/etc/bnb-mail.env")),
         Path(__file__).resolve().parent.parent / ".env",
         Path(".env"),
         Path("/root/.env"),
     ]
     for p in env_paths:
-        if p.exists() and p.is_file():
-            try:
+        try:
+            if p.exists() and p.is_file():
                 for line in p.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
                     if line and not line.startswith("#") and "=" in line:
@@ -28,9 +30,10 @@ def load_env_file():
                         v = v.strip().strip("'").strip('"')
                         if k and k not in os.environ:
                             os.environ[k] = v
-            except Exception:
-                pass
-            break
+                return
+        except (OSError, UnicodeError):
+            # The pipe runs as an unprivileged user and must skip root-only files.
+            continue
 
 
 load_env_file()
@@ -98,6 +101,36 @@ def extract_bodies(msg):
     return text_body, html_body
 
 
+def extract_attachments(msg):
+    """Convert MIME attachments to Brevo's base64 attachment payload."""
+    attachments = []
+    for part in msg.walk():
+        filename = part.get_filename()
+        if not filename or part.get_content_disposition() != "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        # Do not let a supplied MIME filename escape its intended attachment name.
+        name = Path(filename).name or "attachment"
+        attachments.append(
+            {"name": name, "content": base64.b64encode(payload).decode("ascii")}
+        )
+    return attachments
+
+
+def header_addresses(msg, header_name):
+    """Return de-duplicated email addresses from a RFC 5322 address header."""
+    seen = set()
+    result = []
+    for _, address in emaillib.utils.getaddresses(msg.get_all(header_name, [])):
+        address = address.strip().lower()
+        if "@" in address and address not in seen:
+            seen.add(address)
+            result.append(address)
+    return result
+
+
 def parse_from_header(from_header):
     from_header = (from_header or "").strip()
     if "<" in from_header and ">" in from_header:
@@ -151,6 +184,7 @@ def main():
     from_name, from_email = parse_from_header(msg.get("From", f"noreply@{DOMAIN}"))
 
     text_body, html_body = extract_bodies(msg)
+    attachments = extract_attachments(msg)
 
     # HARD GUARANTEE: never let textContent be absent/None/blank
     safe_text = safe_str(text_body, "").strip()
@@ -174,12 +208,18 @@ def main():
         "textContent": safe_text
     }
 
-    # Always ensure gobitsnbytes@gmail.com is CC'd for full organization visibility
-    if to_addr.strip().lower() != "gobitsnbytes@gmail.com":
-        payload_obj["cc"] = [{"email": "gobitsnbytes@gmail.com"}]
+    # Preserve explicit Cc recipients and always copy the organization visibly.
+    cc_addresses = header_addresses(msg, "Cc")
+    audit_address = "gobitsnbytes@gmail.com"
+    if to_addr.strip().lower() != audit_address and audit_address not in cc_addresses:
+        cc_addresses.append(audit_address)
+    if cc_addresses:
+        payload_obj["cc"] = [{"email": address} for address in cc_addresses]
 
     if html_body:
         payload_obj["htmlContent"] = html_body
+    if attachments:
+        payload_obj["attachment"] = attachments
 
     payload = json.dumps(payload_obj, ensure_ascii=False).encode("utf-8")
 

@@ -1,2 +1,2 @@
-hello@gobitsnbytes.org gobitsnbytes@gmail.com
-sponsors@gobitsnbytes.org gobitsnbytes@gmail.com
+# Intentionally empty. Outbound organisation copies are visible Cc recipients
+# added by scripts/brevo-send.py, not Postfix Bcc recipients.

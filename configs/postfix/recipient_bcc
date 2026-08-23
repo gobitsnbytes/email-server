@@ -1,0 +1,11 @@
+# Inbound audit copies for organisation mailboxes. Postfix adds these as BCC
+# recipients; the original recipient and message headers remain unchanged.
+akshat@gobitsnbytes.org gobitsnbytes@gmail.com
+devaansh@gobitsnbytes.org gobitsnbytes@gmail.com
+srishti@gobitsnbytes.org gobitsnbytes@gmail.com
+raghwender@gobitsnbytes.org gobitsnbytes@gmail.com
+drishti@gobitsnbytes.org gobitsnbytes@gmail.com
+aadrika@gobitsnbytes.org gobitsnbytes@gmail.com
+maryam@gobitsnbytes.org gobitsnbytes@gmail.com
+yash@gobitsnbytes.org gobitsnbytes@gmail.com
+hello@gobitsnbytes.org gobitsnbytes@gmail.com

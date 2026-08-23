@@ -248,12 +248,13 @@ step_stop_services() {
 
 step_place_postfix() {
   log_step "3/14 Place Postfix configs"
-  for f in main.cf master.cf virtual transport sender_bcc; do
+  for f in main.cf master.cf virtual transport sender_bcc recipient_bcc; do
     file_copy "${CONFIG_DIR}/postfix/${f}" "/etc/postfix/${f}"
   done
   run_cmd "postmap virtual" postmap /etc/postfix/virtual
   run_cmd "postmap transport" postmap /etc/postfix/transport || log_warn "transport.db map failed"
   run_cmd "postmap sender_bcc" postmap /etc/postfix/sender_bcc || log_warn "sender_bcc.db map failed"
+  run_cmd "postmap recipient_bcc" postmap /etc/postfix/recipient_bcc || log_warn "recipient_bcc.db map failed"
   # aliases
   file_write "/etc/aliases" "postmaster: root\n"
   run_cmd "newaliases" newaliases
@@ -373,6 +374,11 @@ step_brevo_script() {
   if [[ -n "$api_key" ]] && [[ "$MODE" == "apply" ]]; then
     file_write "/root/.env" "BREVO_API_KEY=${api_key}\nDOMAIN=${DOMAIN}\nMAIL_HOST=${MAIL_HOST}\n" "Environment file /root/.env"
     chmod 600 /root/.env
+    # Postfix executes the Brevo transport as `nobody`, so it cannot read /root/.env.
+    # Keep a narrowly readable copy for that transport only (Ubuntu's nobody group is nogroup).
+    file_write "/etc/bnb-mail.env" "BREVO_API_KEY=${api_key}\nDOMAIN=${DOMAIN}\nMAIL_HOST=${MAIL_HOST}\n" "Postfix Brevo environment"
+    chown root:nogroup /etc/bnb-mail.env
+    chmod 640 /etc/bnb-mail.env
   fi
 }
 
