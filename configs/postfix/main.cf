@@ -73,3 +73,8 @@ brevo_destination_concurrency_limit = 2
 sender_bcc_maps = 
 always_bcc = 
 recipient_bcc_maps = 
+# Hardening: no legacy TLS, no mailbox enumeration via VRFY, require HELO.
+smtpd_tls_protocols = >=TLSv1.2
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+disable_vrfy_command = yes
+smtpd_helo_required = yes
