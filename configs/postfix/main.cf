@@ -63,8 +63,13 @@ smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, rej
 smtp_sasl_tls_security_options = noanonymous
 smtp_use_tls = yes
 local_transport = local
-default_transport = brevo
-relay_transport = brevo
+# Fixed nexthop so qmgr hands the pipe ALL recipients of a message in one call
+# (per-domain grouping + argv[1]-only silently dropped recipients).
+default_transport = brevo:api
+relay_transport = brevo:api
+brevo_destination_recipient_limit = 50
+# Each pipe run is a ~20MB python process; cap it on the 1GB VPS.
+brevo_destination_concurrency_limit = 2
 sender_bcc_maps = 
 always_bcc = 
 recipient_bcc_maps = 
