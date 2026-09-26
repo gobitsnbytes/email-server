@@ -167,19 +167,37 @@ def fix_unicode_escapes(text):
     return text
 
 
+# sysexits: Postfix pipe(8) keeps EX_TEMPFAIL mail queued and retries it;
+# EX_DATAERR bounces it. Anything that isn't the message's fault must retry.
+EX_DATAERR = 65
+EX_TEMPFAIL = 75
+
+
+def split_recipients(msg, envelope):
+    """Map envelope recipients onto Brevo to/cc/bcc for a single API call.
+
+    Postfix hands us every recipient of the message (brevo_destination_recipient_limit),
+    so each person gets exactly one copy and header-visible roles are preserved.
+    """
+    rcpts = list(dict.fromkeys(a.strip().lower() for a in envelope if "@" in a))
+    to_hdr, cc_hdr = set(header_addresses(msg, "To")), set(header_addresses(msg, "Cc"))
+    to = [r for r in rcpts if r in to_hdr]
+    cc = [r for r in rcpts if r in cc_hdr and r not in to_hdr]
+    bcc = [r for r in rcpts if r not in to_hdr and r not in cc_hdr]
+    if not to:  # Brevo requires a "to"; promote a visible recipient before a hidden one
+        to = [(cc or bcc).pop(0)] if (cc or bcc) else []
+    return to, cc, bcc
+
+
 def main():
     if not BREVO_API_KEY:
         print('ERR: {"code":"missing_api_key","message":"BREVO_API_KEY is not set in environment or .env file"}', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EX_TEMPFAIL)
 
-    try:
-        raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
-    except Exception:
-        raw = sys.stdin.read()
+    msg = emaillib.message_from_bytes(sys.stdin.buffer.read())
 
-    msg = emaillib.message_from_string(raw)
-
-    to_addr = safe_str(sys.argv[1] if len(sys.argv) > 1 else msg.get("To", ""), "").strip()
+    to, cc, bcc = split_recipients(msg, sys.argv[1:])
+    to_addr = ",".join(to)
     subject = fix_unicode_escapes(safe_str(msg.get("Subject", "(no subject)"), "(no subject)").strip() or "(no subject)")
     from_name, from_email = parse_from_header(msg.get("From", f"noreply@{DOMAIN}"))
 
@@ -191,27 +209,26 @@ def main():
     if not safe_text:
         safe_text = html_to_text(safe_str(html_body, ""))
     if not safe_text:
-        safe_text = " "  # one-space fallback to satisfy strict validators
+        safe_text = subject  # Brevo rejects blank textContent (bounced 792F440549)
 
     safe_text = fix_unicode_escapes(safe_text)
     if html_body:
         html_body = fix_unicode_escapes(safe_str(html_body, ""))
 
-    if not to_addr:
+    if not to:
         print('ERR: {"code":"missing_parameter","message":"recipient email is missing"}', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EX_DATAERR)
 
     payload_obj = {
         "sender": {"email": from_email, "name": from_name},
-        "to": [{"email": to_addr}],
+        "to": [{"email": a} for a in to],
         "subject": subject,
         "textContent": safe_text
     }
-
-    # Preserve only explicit Cc recipients; no automatic audit copy.
-    cc_addresses = header_addresses(msg, "Cc")
-    if cc_addresses:
-        payload_obj["cc"] = [{"email": address} for address in cc_addresses]
+    if cc:
+        payload_obj["cc"] = [{"email": a} for a in cc]
+    if bcc:
+        payload_obj["bcc"] = [{"email": a} for a in bcc]
 
     if html_body:
         payload_obj["htmlContent"] = html_body
@@ -245,10 +262,11 @@ def main():
             "has_html": bool(html_body),
         }
         print("ERR:", err_body, "| debug=", json.dumps(debug), file=sys.stderr)
-        sys.exit(1)
+        # Only a rejected payload is the message's fault; auth/rate-limit/5xx retry.
+        sys.exit(EX_DATAERR if e.code == 400 else EX_TEMPFAIL)
     except Exception as e:
         print(f"ERR: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EX_TEMPFAIL)
 
 
 if __name__ == "__main__":
