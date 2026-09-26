@@ -30,7 +30,7 @@ DNS TXT:  brevo-code, zoho-verification, google-site-verification
 ```
 Port:   127.0.0.1:8501
 URL:    https://mail.gobitsnbytes.org/admin/ (nginx proxy_pass + auth_basic)
-Auth:   /etc/nginx/.mailadmin.htpasswd (admin:$apr1$DhM/IGy7$vDZuOR9DipoKBxBvLKzL81)
+Auth:   /etc/nginx/.mailadmin.htpasswd (nginx basic auth; never commit hashes)
 Systemd: mail-admin.service → /root/.venv/bin/streamlit run /root/mail-server-backend.py --server.address 127.0.0.1 --server.port 8501
 ```
 
