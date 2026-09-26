@@ -208,11 +208,8 @@ def main():
         "textContent": safe_text
     }
 
-    # Preserve explicit Cc recipients and always copy the organization visibly.
+    # Preserve only explicit Cc recipients; no automatic audit copy.
     cc_addresses = header_addresses(msg, "Cc")
-    audit_address = "gobitsnbytes@gmail.com"
-    if to_addr.strip().lower() != audit_address and audit_address not in cc_addresses:
-        cc_addresses.append(audit_address)
     if cc_addresses:
         payload_obj["cc"] = [{"email": address} for address in cc_addresses]
 

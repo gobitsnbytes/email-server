@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime
+import html
 import json
 import os
 import pwd
@@ -10,6 +11,8 @@ import string
 import subprocess
 import textwrap
 from email.message import EmailMessage
+from email import policy
+from email.parser import BytesParser
 from pathlib import Path
 from urllib import error, request
 from urllib.parse import quote_plus
@@ -22,6 +25,7 @@ def load_env_file():
     env_paths = [
         Path(__file__).resolve().parent / ".env",
         Path(".env"),
+        Path("/etc/bnb-mail.env"),
         Path("/root/.env"),
     ]
     for p in env_paths:
@@ -53,7 +57,7 @@ LE_CERT_FULLCHAIN = os.environ.get("LE_CERT_FULLCHAIN", f"/etc/letsencrypt/live/
 MAIL_LOG_FILE = os.environ.get("MAIL_LOG_FILE", "/var/log/mail.log")
 
 DEFAULT_WIKI_URL = os.environ.get("DEFAULT_WIKI_URL", "https://app.notion.com/p/33949ed2fc33818ba073ffa2d815bf1a?v=33949ed2fc3380ccbfe2000c860aa29a&source=copy_link")
-AUDIT_BCC_EMAIL = os.environ.get("AUDIT_BCC_EMAIL", f"gobitsnbytes@gmail.com")
+AUDIT_BCC_EMAIL = os.environ.get("AUDIT_BCC_EMAIL", "")
 USE_HELLO_AS_SENDER = os.environ.get("USE_HELLO_AS_SENDER", "True").lower() in ("true", "1", "yes")
 
 TAG_PREFIX = "# TAG:"
@@ -1507,6 +1511,128 @@ def brevo_health_snapshot() -> dict:
     return {"account": account, "smtp_stats": smtp}
 
 
+def brevo_credit_summary(snapshot: dict) -> tuple[str, str]:
+    data = (snapshot.get("account") or {}).get("data") or {}
+    plans = data.get("plan") or []
+    if not plans:
+        return "unknown", ""
+    plan = plans[0]
+    return str(plan.get("credits", "unknown")), str(plan.get("type", ""))
+
+
+def mailbox_overview() -> list[dict]:
+    overview = []
+    for row in list_mailboxes():
+        username = row.get("username", "")
+        messages = mailbox_inbox_rows(username, limit=500)
+        unread = sum("\\Seen" not in str(m.get("flags", "")) for m in messages)
+        overview.append({"mailbox": f"{username}@{DOMAIN}", "messages": len(messages), "unread": unread})
+    return overview
+
+
+def mailbox_inbox_rows(username: str, limit: int = 100) -> list[dict]:
+    """Return recent inbox headers for one local mailbox."""
+    addr = f"{username}@{DOMAIN}"
+    result = run_cmd(["doveadm", "fetch", "-u", addr,
+                      "hdr.date hdr.from hdr.subject flags uid",
+                      "mailbox", "INBOX", "ALL"], timeout=30)
+    if not result["ok"]:
+        # Some historical accounts have a Maildir left on disk but no longer
+        # have a Dovecot userdb entry. Keep them visible to the admin by
+        # reading the Maildir directly rather than reporting a false empty inbox.
+        maildir = Path("/home") / username / "Maildir"
+        fallback = []
+        for folder in ("new", "cur"):
+            for path in sorted((maildir / folder).glob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+                if not path.is_file():
+                    continue
+                try:
+                    msg = BytesParser(policy=policy.default).parsebytes(path.read_bytes())
+                    fallback.append({"hdr.date": msg.get("Date", ""), "hdr.from": msg.get("From", ""),
+                                     "hdr.subject": msg.get("Subject", ""), "flags": "", "uid": f"file:{path}"})
+                except Exception:
+                    continue
+        return fallback[:limit]
+    rows, current = [], {}
+    for line in result["stdout"].splitlines():
+        line = line.strip()
+        if not line:
+            if current:
+                rows.append(current); current = {}
+            continue
+        if ":" in line:
+            key, value = line.split(":", 1)
+            current[key.strip()] = value.strip()
+    if current: rows.append(current)
+    return rows[-limit:][::-1]
+
+
+def mailbox_message_preview(username: str, uid: str) -> str:
+    result = run_cmd(["doveadm", "fetch", "-u", f"{username}@{DOMAIN}",
+                      "body.preview", "mailbox", "INBOX", "uid", str(uid)], timeout=20)
+    if not result["ok"]: return result.get("stderr", "Unable to load preview.")
+    for line in result["stdout"].splitlines():
+        if line.startswith("body.preview:"): return line.split(":", 1)[1].strip()
+    return result["stdout"]
+
+
+def mailbox_message_text(username: str, uid: str) -> str:
+    if str(uid).startswith("file:"):
+        path = Path(str(uid)[5:])
+        if not path.is_file(): return "Message file is no longer available."
+        try:
+            message = BytesParser(policy=policy.default).parsebytes(path.read_bytes())
+            plain, html_parts = [], []
+            for part in message.walk():
+                if part.get_content_maintype() == "multipart": continue
+                content = part.get_content()
+                if part.get_content_type() == "text/plain": plain.append(content)
+                elif part.get_content_type() == "text/html": html_parts.append(content)
+            if plain: return "\n\n".join(plain).strip()
+            if html_parts:
+                cleaned = re.sub(r"<br\\s*/?>", "\n", html_parts[0], flags=re.I)
+                cleaned = re.sub(r"<[^>]+>", "", cleaned)
+                return html.unescape(cleaned).strip()
+        except Exception as exc:
+            return f"Unable to decode message: {exc}"
+        return "(empty message)"
+    result = run_cmd(["doveadm", "fetch", "-u", f"{username}@{DOMAIN}",
+                      "text.utf8", "mailbox", "INBOX", "uid", str(uid)], timeout=30)
+    if not result["ok"]: return result.get("stderr", "Unable to load message.")
+    raw = result["stdout"]
+    raw = raw.split("text.utf8:", 1)[1].strip() if "text.utf8:" in raw else raw
+    try:
+        # Dovecot's text.utf8 field may omit the top-level MIME headers.
+        # Reconstruct a minimal multipart envelope so the standard parser can
+        # decode quoted-printable/base64 parts instead of exposing wire data.
+        if raw.startswith("--"):
+            boundary = raw.splitlines()[0][2:].strip()
+            raw = (f'MIME-Version: 1.0\nContent-Type: multipart/alternative; '
+                   f'boundary="{boundary}"\n\n{raw}')
+        message = BytesParser(policy=policy.default).parsebytes(raw.encode("utf-8", errors="replace"))
+        plain_parts, html_parts = [], []
+        for part in message.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            content = part.get_content()
+            if not content:
+                continue
+            if part.get_content_type() == "text/plain":
+                plain_parts.append(content)
+            elif part.get_content_type() == "text/html":
+                html_parts.append(content)
+        if plain_parts:
+            return "\n\n".join(plain_parts).strip()
+        if html_parts:
+            cleaned = re.sub(r"<br\\s*/?>", "\n", html_parts[0], flags=re.I)
+            cleaned = re.sub(r"</p\\s*>", "\n\n", cleaned, flags=re.I)
+            cleaned = re.sub(r"<[^>]+>", "", cleaned)
+            return html.unescape(cleaned).strip()
+    except Exception:
+        pass
+    return raw
+
+
 # =========================
 # UI
 # =========================
@@ -1516,6 +1642,7 @@ page = st.sidebar.radio(
     [
         "Health",
         "Mailboxes",
+        "Inboxes",
         "Lists & Forwards",
         "Auth Tests",
         "Queue",
@@ -1539,7 +1666,7 @@ if safe_toggle != current_safe:
 
 effective_safe = read_safe_mode()
 st.sidebar.write(f"Effective mode: `{'SAFE' if effective_safe else 'UNSAFE'}`")
-st.sidebar.write(f"Audit BCC: `{AUDIT_BCC_EMAIL}`")
+st.sidebar.write("Audit copies: `disabled`")
 st.sidebar.write(f"Credential sender: `{sender_email()}`")
 st.sidebar.write(f"Quota policy file: `{QUOTA_POLICY_FILE}`")
 st.sidebar.write(f"Brevo key source: `env or {BREVO_SEND_SCRIPT}`")
@@ -1559,11 +1686,26 @@ else:
 if page == "Health":
     st.subheader("Service health")
 
-    c1, c2, c3, c4 = st.columns(4)
+    if st.button("Refresh dashboard"):
+        st.rerun()
+
+    snap = brevo_health_snapshot()
+    credits, plan = brevo_credit_summary(snap)
+    overview = mailbox_overview()
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Postfix", get_service_status("postfix"))
     c2.metric("Dovecot", get_service_status("dovecot"))
     c3.metric("OpenDKIM", get_service_status("opendkim"))
     c4.metric("Queue count", get_queue_count())
+    c5.metric("Brevo credits", credits, help=f"Current {plan or 'Brevo'} send-limit credits")
+
+    if overview:
+        st.markdown("### Mailbox snapshot")
+        st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
+    if snap["account"]["ok"]:
+        st.caption("Brevo balance is live from the account API. One primary-recipient email normally consumes one credit.")
+    else:
+        st.warning("Brevo balance unavailable; check the Brevo page for API diagnostics.")
 
     st.markdown("### TLS certificate")
     st.json(get_cert_dates())
@@ -1754,6 +1896,35 @@ elif page == "Mailboxes":
                         )
                         with st.expander(f"Details: {item['recipient']}"):
                             st.json(item)
+
+
+# -------------------------
+# Page: Inboxes
+# -------------------------
+elif page == "Inboxes":
+    st.subheader("Inbox viewer")
+    st.caption("Admin-only view of local Dovecot mailboxes. Automatic audit copies are disabled.")
+    users = [r["username"] for r in list_mailboxes()]
+    if not users:
+        st.info("No local mailboxes found.")
+    else:
+        selected = st.selectbox("Mailbox", users, format_func=lambda u: f"{u}@{DOMAIN}")
+        rows = mailbox_inbox_rows(selected)
+        if not rows:
+            auth_check = run_cmd(["doveadm", "user", f"{selected}@{DOMAIN}"], timeout=15)
+            if not auth_check["ok"] and (Path("/home") / selected / "Maildir").is_dir():
+                st.warning("This mailbox has a Maildir on disk but no active Dovecot userdb entry.")
+            else:
+                st.info("Inbox is empty or could not be read.")
+        else:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            uid_options = [str(r.get("uid")) for r in rows if r.get("uid")]
+            if uid_options:
+                uid = st.selectbox("Open message", uid_options,
+                                   format_func=lambda value: next((
+                                       f"{r.get('hdr.from', '(unknown)')} — {r.get('hdr.subject', '(no subject)')}"
+                                       for r in rows if str(r.get('uid')) == value), value))
+                st.text_area("Message", mailbox_message_text(selected, uid), height=420)
 
 
 # -------------------------
