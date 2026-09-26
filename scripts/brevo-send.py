@@ -196,7 +196,9 @@ def main():
 
     msg = emaillib.message_from_bytes(sys.stdin.buffer.read())
 
-    to, cc, bcc = split_recipients(msg, sys.argv[1:])
+    # No argv = run directly (admin panel credential mail): take recipients from headers.
+    envelope = sys.argv[1:] or [a for h in ("To", "Cc", "Bcc") for a in header_addresses(msg, h)]
+    to, cc, bcc = split_recipients(msg, envelope)
     to_addr = ",".join(to)
     subject = fix_unicode_escapes(safe_str(msg.get("Subject", "(no subject)"), "(no subject)").strip() or "(no subject)")
     from_name, from_email = parse_from_header(msg.get("From", f"noreply@{DOMAIN}"))
