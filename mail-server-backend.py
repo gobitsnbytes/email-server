@@ -633,9 +633,7 @@ def list_mailboxes() -> list[dict]:
             shell = pw.pw_shell
             home = pw.pw_dir
         except KeyError:
-            uid = None
-            shell = ""
-            home = str(p)
+            continue
 
         if uid is not None and uid < 1000 and user != "root":
             continue
@@ -674,6 +672,14 @@ def create_mailbox_autogen(
             "steps": [],
         }
 
+    if (Path("/home") / username).exists():
+        return {
+            "ok": False,
+            "blocked": False,
+            "message": f"Home directory for '{username}' exists without a user. Repair it before creating the mailbox.",
+            "steps": [],
+        }
+
     password = generate_password()
     steps = []
 
@@ -698,7 +704,11 @@ def create_mailbox_autogen(
     )
 
     steps.append(run_cmd(["useradd", "-m", "-s", "/usr/sbin/nologin", username]))
+    if not steps[-1]["ok"]:
+        return {"ok": False, "blocked": False, "message": "User creation failed.", "steps": steps}
     steps.append(run_cmd(["chpasswd"], input_text=f"{username}:{password}\n"))
+    if not steps[-1]["ok"]:
+        return {"ok": False, "blocked": False, "message": "Password setup failed.", "steps": steps}
 
     home = Path("/home") / username
     steps.append(run_cmd(["mkdir", "-p", str(home / "Maildir" / "cur")]))
@@ -710,6 +720,8 @@ def create_mailbox_autogen(
     steps.append(
         run_cmd(["chown", "-R", f"{username}:{username}", str(home / "Maildir")])
     )
+    if not all(step["ok"] for step in steps):
+        return {"ok": False, "blocked": False, "message": "Maildir setup failed.", "steps": steps}
 
     email = f"{username}@{DOMAIN}"
     try:
@@ -1723,6 +1735,10 @@ elif page == "Mailboxes":
     rows = list_mailboxes()
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
+    orphaned = [p.name for p in Path("/home").iterdir()
+                if p.is_dir() and (p / "Maildir").is_dir() and not user_exists(p.name)]
+    if orphaned:
+        st.warning("Inactive Maildir folders (no login): " + ", ".join(sorted(orphaned)))
 
     st.markdown("---")
     st.markdown("### Create mailbox (auto-generated password)")
