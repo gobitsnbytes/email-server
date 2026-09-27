@@ -100,8 +100,7 @@ execs
 contributors 
 everyone    all users
 
-# Catch-all
-@gobitsnbytes.org  hello@gobitsnbytes.org
+# No catch-all: unknown addresses must not be delivered to hello.
 
 # Tags in virtual file
 # TAG: volunteer   (marker used by streamlit UI for grouping)
@@ -333,7 +332,7 @@ virtual_alias lookup → local delivery → dovecot IMAP :993
 
 ### Forward/alias resolution:
 ```
-virtual_alias_maps → /etc/postfix/virtual (catch-all → hello, lists expand, forwards resolve)
+virtual_alias_maps → /etc/postfix/virtual (named mailboxes, lists, and forwards; no catch-all)
 → if local user → Maildir delivery
 → if external → default_transport=brevo → brevo-send.py
 ```

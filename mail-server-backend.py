@@ -1938,7 +1938,7 @@ elif page == "Lists & Forwards":
     c1.metric("List addresses", len(v["lists"]))
     c2.metric("Forwards", len(v["forwards"]))
     c3.metric("Tags", len(v["tags"]))
-    c4.metric("Catch-all", "set" if v["catch_all"] else "missing")
+    c4.metric("Catch-all", "on" if v["catch_all"] else "off")
 
     st.markdown("### Current lists")
     st.dataframe(pd.DataFrame(v["lists"]), use_container_width=True, hide_index=True)
